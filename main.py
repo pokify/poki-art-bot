@@ -15,7 +15,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not all([BOT_TOKEN, API_ID, API_HASH]):
     raise ValueError("Missing env vars!")
 
-# Telethon as USER client (your poki_session.session)
+# Telethon as USER client (poki_session.session)
 user_client = TelegramClient('poki_session', API_ID, API_HASH)
 
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29,7 +29,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photos.append(msg)
 
         if not photos:
-            await update.message.reply_text("No art in @testytestyyo yet! Try again later. 🐹")
+            await update.message.reply_text("No art in @testytestyyo yet! 🐹")
             return
 
         random_msg = random.choice(photos)
@@ -37,19 +37,19 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Forward as BOT (allowed for known messages)
         await context.bot.forward_message(
             chat_id=update.effective_chat.id,
-            from_chat_id=random_msg.peer_id.channel_id,  # Channel ID from msg
+            from_chat_id=random_msg.peer_id.channel_id,
             message_id=random_msg.id
         )
 
     except Exception as e:
-        await update.message.reply_text(f"Art error: {str(e)} 😿")
+        await update.message.reply_text(f"Art error: {str(e)}")
     finally:
         await user_client.disconnect()
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("art", art))
-    print("Poki Art Bot is LIVE! Use /art")
+    print("Poki Art Bot LIVE! Use /art")
     app.run_polling()
 
 if __name__ == "__main__":
