@@ -4,51 +4,48 @@ from telethon import TelegramClient
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# === USER CONFIG (Telethon - Your Phone Login) ===
+# === USER CLIENT (Telethon - Phone Session) ===
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 SOURCE_CHANNEL = os.getenv("SOURCE_CHANNEL", "testytestyyo")
 
-# === BOT CONFIG (PTB - BotFather Token) ===
+# === BOT (PTB - BotFather Token) ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Validate
 if not all([BOT_TOKEN, API_ID, API_HASH]):
-    raise ValueError("Missing BOT_TOKEN, API_ID, or API_HASH!")
+    raise ValueError("Missing env vars!")
 
-# === TELETHON CLIENT (USER SESSION) ===
-client = TelegramClient('poki_session', API_ID, API_HASH)
+# Telethon as USER client (your poki_session.session)
+user_client = TelegramClient('poki_session', API_ID, API_HASH)
 
-# === /art COMMAND ===
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        await client.start()  # Uses poki_session.session (your user login)
+        await user_client.start()  # User session - full history access
 
-        # Fetch photos as USER
+        # Fetch photos as USER (allowed)
         photos = []
-        async for msg in client.iter_messages(SOURCE_CHANNEL, limit=100):
+        async for msg in user_client.iter_messages(SOURCE_CHANNEL, limit=100):
             if msg.photo:
                 photos.append(msg)
 
         if not photos:
-            await update.message.reply_text("No art in @testytestyyo yet! Try again later.")
+            await update.message.reply_text("No art in @testytestyyo yet! Try again later. 🐹")
             return
 
         random_msg = random.choice(photos)
 
-        # Forward via BOT (allowed)
+        # Forward as BOT (allowed for known messages)
         await context.bot.forward_message(
             chat_id=update.effective_chat.id,
-            from_chat_id=random_msg.chat_id,
+            from_chat_id=random_msg.peer_id.channel_id,  # Channel ID from msg
             message_id=random_msg.id
         )
 
     except Exception as e:
-        await update.message.reply_text(f"Art error: {str(e)}")
+        await update.message.reply_text(f"Art error: {str(e)} 😿")
     finally:
-        await client.disconnect()
+        await user_client.disconnect()
 
-# === MAIN ===
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("art", art))
