@@ -1,6 +1,6 @@
 {
   "build": {
-    "builder": "paketobuildpacks/builder:base"
+    "builder": "python"
   },
   "start": "python main.py"
 }
