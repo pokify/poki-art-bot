@@ -3,6 +3,7 @@ import requests
 import os
 import tempfile
 import urllib.parse
+import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -15,57 +16,48 @@ REPO_NAME = "poki-art-bot"
 BRANCH = "main"
 FOLDER_PATH = "media-uploads"
 
-# Cache for 10 mins to avoid rate limits
+# Cache
 _file_cache = None
 _cache_time = 0
-CACHE_TTL = 600
+CACHE_TTL = 600  # 10 mins
 
-def get_hamster_files():
+def get_all_files_in_folder():
     global _file_cache, _cache_time
-    import time
     now = time.time()
-
     if _file_cache and (now - _cache_time) < CACHE_TTL:
         return _file_cache
 
-    # GitHub Search API for full list (up to 1,000; query for hamster files)
-    search_url = "https://api.github.com/search/code"
-    query = f"filename:hamster repo:{REPO_OWNER}/{REPO_NAME} path:media-uploads"
-    params = {
-        "q": query,
-        "per_page": 100,  # Max 100; multiple pages for 1,422
-        "page": 1
-    }
-    headers = {"Accept": "application/vnd.github.v3+json"}
+    # Get latest commit SHA
+    commits_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}"
+    commit_resp = requests.get(commits_url, timeout=10)
+    commit_resp.raise_for_status()
+    commit_sha = commit_resp.json()["sha"]
 
+    # Get tree
+    tree_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{commit_sha}?recursive=1"
+    tree_resp = requests.get(tree_url, timeout=15)
+    tree_resp.raise_for_status()
+    tree = tree_resp.json()["tree"]
+
+    # Filter: in media-uploads/, starts with hamster (, ends with .png/.jpg
     files = []
-    page = 1
-    while True:
-        params["page"] = page
-        resp = requests.get(search_url, params=params, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            break
-        data = resp.json()
-        if not data['items']:
-            break
-
-        for item in data['items']:
-            file_name = item['name']
-            if file_name.startswith("hamster (") and file_name.endswith((".png", ".jpg")):
-                files.append(file_name)
-
-        page += 1
+    prefix = f"{FOLDER_PATH}/"
+    for item in tree:
+        if item["type"] == "blob" and item["path"].startswith(prefix):
+            name = item["path"][len(prefix):]
+            if name.startswith("hamster (") and name.endswith((".png", ".jpg")):
+                files.append(name)
 
     _file_cache = files
     _cache_time = now
-    print(f"Found {len(files)} hamster images via search API.")
+    print(f"Found {len(files)} hamster images (full tree scan).")
     return files
 
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        files = get_hamster_files()
+        files = get_all_files_in_folder()
         if not files:
-            await update.message.reply_text("No hamster art found! Check folder. 🐹")
+            await update.message.reply_text("No hamster art found! Check media-uploads/. 🐹")
             return
 
         file_name = random.choice(files)
@@ -94,7 +86,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("art", art))
-    print("Poki Art Bot LIVE! Pulling from media-uploads/")
+    print("Poki Art Bot LIVE! Full scan of media-uploads/")
     app.run_polling()
 
 if __name__ == "__main__":
