@@ -15,40 +15,51 @@ REPO_NAME = "poki-art-bot"
 BRANCH = "main"
 FOLDER_PATH = "media-uploads"
 
-# Cache file list to avoid API spam (refresh every 5 mins)
+# Cache for 10 mins to avoid rate limits
 _file_cache = None
 _cache_time = 0
-CACHE_TTL = 300  # 5 minutes
+CACHE_TTL = 600
 
 def get_hamster_files():
     global _file_cache, _cache_time
-    now = os.times()[4]  # uptime in seconds
+    import time
+    now = time.time()
 
     if _file_cache and (now - _cache_time) < CACHE_TTL:
         return _file_cache
 
-    api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FOLDER_PATH}?ref={BRANCH}"
+    # GitHub Search API for full list (up to 1,000; query for hamster files)
+    search_url = "https://api.github.com/search/code"
+    query = f"filename:hamster repo:{REPO_OWNER}/{REPO_NAME} path:media-uploads"
+    params = {
+        "q": query,
+        "per_page": 100,  # Max 100; multiple pages for 1,422
+        "page": 1
+    }
     headers = {"Accept": "application/vnd.github.v3+json"}
 
-    try:
-        resp = requests.get(api_url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        files = resp.json()
+    files = []
+    page = 1
+    while True:
+        params["page"] = page
+        resp = requests.get(search_url, params=params, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        if not data['items']:
+            break
 
-        # Filter: starts with "hamster (" and ends with .png or .jpg
-        hamster_files = [
-            f for f in files
-            if f["name"].startswith("hamster (") and f["name"].endswith((".png", ".jpg"))
-        ]
+        for item in data['items']:
+            file_name = item['name']
+            if file_name.startswith("hamster (") and file_name.endswith((".png", ".jpg")):
+                files.append(file_name)
 
-        _file_cache = hamster_files
-        _cache_time = now
-        print(f"Found {len(hamster_files)} hamster images.")
-        return hamster_files
+        page += 1
 
-    except Exception as e:
-        print(f"GitHub API error: {e}")
-        return _file_cache or []  # fallback to cache
+    _file_cache = files
+    _cache_time = now
+    print(f"Found {len(files)} hamster images via search API.")
+    return files
 
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -57,8 +68,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No hamster art found! Check folder. 🐹")
             return
 
-        file = random.choice(files)
-        file_name = file["name"]
+        file_name = random.choice(files)
         encoded_name = urllib.parse.quote(file_name)
         raw_url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/{FOLDER_PATH}/{encoded_name}"
 
