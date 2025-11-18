@@ -18,41 +18,28 @@ FOLDER_PATH = "media-uploads"
 
 # Persistent storage
 DATA_DIR = "/data"
-SEEN_FILE = f"{DATA_DIR}/seen_images.pkl"
-INDEX_FILE = f"{DATA_DIR}/image_index.pkl"
-
-# Ensure /data exists
 os.makedirs(DATA_DIR, exist_ok=True)
+SEEN_FILE = f"{DATA_DIR}/seen_images.pkl"
 
-# Load or initialize seen images and index
-def load_state():
-    seen = set()
-    index = 0
+# Load seen set
+def load_seen():
     if os.path.exists(SEEN_FILE):
         try:
             with open(SEEN_FILE, "rb") as f:
-                data = pickle.load(f)
-                seen = data.get("seen", set())
+                return pickle.load(f)
         except:
-            pass
-    if os.path.exists(INDEX_FILE):
-        try:
-            with open(INDEX_FILE, "rb") as f:
-                index = pickle.load(f).get("index", 0)
-        except:
-            pass
-    return seen, index
+            return set()
+    return set()
 
-def save_state(seen, index):
+# Save seen set
+def save_seen(seen):
     try:
         with open(SEEN_FILE, "wb") as f:
-            pickle.dump({"seen": seen}, f)
-        with open(INDEX_FILE, "wb") as f:
-            pickle.dump({"index": index}, f)
+            pickle.dump(seen, f)
     except:
-        pass  # Best effort
+        pass
 
-seen_images, current_index = load_state()
+seen_images = load_seen()
 all_files = []
 
 def get_all_files():
@@ -60,25 +47,16 @@ def get_all_files():
     if all_files:
         return all_files
 
-    # Get latest commit
+    # Get latest commit SHA
     try:
-        commit_resp = requests.get(
-            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}",
-            timeout=10
-        )
-        commit_resp.raise_for_status()
-        commit_sha = commit_resp.json()["sha"]
+        commit = requests.get(f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}").json()
+        sha = commit["sha"]
     except:
         return all_files
 
-    # Full recursive tree
+    # Full tree
     try:
-        tree_resp = requests.get(
-            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{commit_sha}?recursive=1",
-            timeout=15
-        )
-        tree_resp.raise_for_status()
-        tree = tree_resp.json()["tree"]
+        tree = requests.get(f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{sha}?recursive=1").json()["tree"]
     except:
         return all_files
 
@@ -91,44 +69,39 @@ def get_all_files():
                 files.append(name)
 
     all_files = files
-    print(f"Loaded {len(all_files)} hamster images.")
+    print(f"Loaded {len(files)} images.")
     return files
 
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_index, seen_images, all_files
-
     try:
         files = get_all_files()
         if not files:
-            await update.message.reply_text("No hamster art found! Check media-uploads/. Hamster")
+            await update.message.reply_text("No art found! 🐹")
             return
 
         # Reset if all seen
         if len(seen_images) >= len(files):
-            seen_images = set()
-            current_index = 0
-            save_state(seen_images, current_index)
-            print("All images shown — reset cycle!")
+            seen_images.clear()
+            save_seen(seen_images)
+            print("All images shown — reset!")
 
-        # Pick next in sequence
-        while True:
-            file_name = files[current_index]
-            current_index = (current_index + 1) % len(files)
-            if file_name not in seen_images:
-                break
+        # True random from unseen
+        available = [f for f in files if f not in seen_images]
+        if not available:
+            available = files  # fallback
 
-        seen_images.add(file_name)
-        save_state(seen_images, current_index)
+        chosen = random.choice(available)
+        seen_images.add(chosen)
+        save_seen(seen_images)
 
-        encoded = urllib.parse.quote(file_name)
+        encoded = urllib.parse.quote(chosen)
         url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/{FOLDER_PATH}/{encoded}"
-
-        print(f"Sending: {url} | Progress: {len(seen_images)}/{len(files)}")
+        print(f"Sending: {url} | Seen: {len(seen_images)}/{len(files)}")
 
         r = requests.get(url, timeout=12)
         r.raise_for_status()
 
-        suffix = os.path.splitext(file_name)[1]
+        suffix = os.path.splitext(chosen)[1]
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         tmp.write(r.content)
         tmp_path = tmp.name
@@ -140,12 +113,12 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.unlink(tmp_path)
 
     except Exception as e:
-        await update.message.reply_text(f"Art error: {e} Hamster")
+        await update.message.reply_text(f"Art error: {e} 😿")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("art", art))
-    print(f"Poki Art Bot LIVE! No repeats until all {len(get_all_files())} seen.")
+    print(f"Poki Art Bot LIVE! {len(get_all_files())} images | Seen: {len(seen_images)}")
     app.run_polling()
 
 if __name__ == "__main__":
