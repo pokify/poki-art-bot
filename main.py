@@ -105,7 +105,6 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Oops there are some Pokis in the works. Art Dealer has been informed. Try again soon! 🐹")
         return
 
-    # Reset seen images if we've gone through everything
     if len(seen_images) >= len(files):
         seen_images.clear()
         save_state()
@@ -134,11 +133,12 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tmp_path = tmp.name
             tmp.close()
 
+            # ← Caption completely removed here
             with open(tmp_path, "rb") as photo:
-                await update.message.reply_photo(photo=photo, caption="🐹 Hamster art for you!")
+                await update.message.reply_photo(photo=photo)
 
             os.unlink(tmp_path)
-            return  # success
+            return
 
         except requests.HTTPError as e:
             if e.response.status_code == 404:
@@ -151,7 +151,6 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Unexpected error on {chosen}: {e}")
             break
 
-    # Only shown if all 5 attempts failed (or repo is empty/broken)
     await update.message.reply_text("Oops there are some Pokis in the works. Art Dealer has been informed. Try again soon! 🐹")
 
 # =============== MAIN ===============
