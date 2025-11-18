@@ -16,7 +16,7 @@ REPO_NAME = "poki-art-bot"
 BRANCH = "main"
 FOLDER_PATH = "media-uploads"
 
-# Persistent storage
+# Persistent storage now
 DATA_DIR = "/data"
 os.makedirs(DATA_DIR, exist_ok=True)
 SEEN_FILE = f"{DATA_DIR}/seen_images.pkl"
