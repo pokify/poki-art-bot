@@ -15,7 +15,7 @@ REPO_NAME = "poki-art-bot"
 BRANCH = "main"
 FOLDER_PATH = "media-uploads"
 
-# Cache the file list (refresh every 10 minute)
+# Cache the file list (refresh every 10 minutes)
 _file_cache = None
 _cache_time = 0
 CACHE_TTL = 600
