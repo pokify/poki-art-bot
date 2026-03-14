@@ -84,7 +84,7 @@ def get_all_files():
         for item in tree:
             if item["type"] == "blob" and item["path"].startswith(prefix):
                 name = item["path"][len(prefix):]
-                if name.startswith("hamster (") and name.endswith((".png", ".jpg", ".jpeg")):
+                if name.startswith("hamster (") and name.endswith((".png", ".jpg", ".jpeg", ".gif")):
                     files.append(name)
 
         all_files = files
