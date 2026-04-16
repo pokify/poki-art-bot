@@ -35,19 +35,15 @@ def load_state():
                 data = pickle.load(f)
                 seen_images = set(data.get("seen", []))
                 all_files = data.get("files", [])
-                print(f"State loaded: {len(seen_images)} seen / {len(all_files)} total")
-        except Exception as e:
-            print(f"Failed to load state: {e}")
+        except:
+            pass
 
 def save_state():
     try:
         with open(STATE_FILE, "wb") as f:
-            pickle.dump({
-                "seen": list(seen_images),
-                "files": all_files
-            }, f)
-    except Exception as e:
-        print(f"Failed to save state: {e}")
+            pickle.dump({"seen": list(seen_images), "files": all_files}, f)
+    except:
+        pass
 
 load_state()
 
@@ -58,21 +54,15 @@ def get_all_files():
         return all_files
 
     try:
-        # Get latest commit SHA
-        commit_resp = requests.get(
-            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}",
+        commit_sha = requests.get(
+            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}", 
             timeout=10
-        )
-        commit_resp.raise_for_status()
-        commit_sha = commit_resp.json()["sha"]
-
-        # Full recursive tree
-        tree_resp = requests.get(
-            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{commit_sha}?recursive=1",
+        ).json()["sha"]
+        
+        tree = requests.get(
+            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{commit_sha}?recursive=1", 
             timeout=20
-        )
-        tree_resp.raise_for_status()
-        tree = tree_resp.json()["tree"]
+        ).json()["tree"]
 
         prefix = f"{FOLDER_PATH}/"
         files = []
@@ -96,16 +86,13 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         files = get_all_files()
         if not files:
-            await update.message.reply_text("Oops there are some Pokis in the works. Art Dealer has been informed. Try again soon! 🐹")
+            await update.message.reply_text("No hamster art found right now. Try again soon! 🐹")
             return
 
-        # Reset if all seen
         if len(seen_images) >= len(files):
             seen_images.clear()
             save_state()
-            print("All images shown — cycle reset!")
 
-        # True random from unseen
         available = [f for f in files if f not in seen_images]
         if not available:
             available = files
@@ -119,24 +106,36 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         print(f"Sending: {chosen} | Seen: {len(seen_images)}/{len(files)}")
 
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
+        # Try up to 2 times (original attempt + 1 retry)
+        for attempt in range(2):
+            try:
+                r = requests.get(url, timeout=15)
+                r.raise_for_status()
+                
+                suffix = os.path.splitext(chosen)[1] or ".jpg"
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                tmp.write(r.content)
+                tmp_path = tmp.name
+                tmp.close()
 
-        suffix = os.path.splitext(chosen)[1] or ".jpg"
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        tmp.write(r.content)
-        tmp_path = tmp.name
-        tmp.close()
+                with open(tmp_path, "rb") as photo:
+                    await update.message.reply_photo(photo=photo)
 
-        with open(tmp_path, "rb") as photo:
-            await update.message.reply_photo(photo=photo)
+                os.unlink(tmp_path)
+                return
 
-        os.unlink(tmp_path)
+            except Exception as e:
+                print(f"Attempt {attempt+1} failed for {chosen}: {e}")
+                if attempt == 0:
+                    await update.message.reply_text("Hang on digging deep in the archives here… 🐹")
+                continue
+
+        # Both attempts failed
+        await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
 
     except Exception as e:
-        # Full error goes to Railway logs only
-        print(f"Art error for user: {e}")
-        await update.message.reply_text("Oops there are some Pokis in the works. Art Dealer has been informed. Try again soon! 🐹")
+        print(f"Unexpected error: {e}")
+        await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
 
 # =============== MAIN ===============
 def main():
