@@ -106,7 +106,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         print(f"Sending: {chosen} | Seen: {len(seen_images)}/{len(files)}")
 
-        # Try up to 2 times (original attempt + 1 retry)
+        # Try up to 2 times (original attempt + 1 retry) - silent retry
         for attempt in range(2):
             try:
                 r = requests.get(url, timeout=15)
@@ -126,9 +126,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             except Exception as e:
                 print(f"Attempt {attempt+1} failed for {chosen}: {e}")
-                if attempt == 0:
-                    await update.message.reply_text("Hang on digging deep in the archives here… 🐹")
-                continue
+                continue  # Silent retry on first failure
 
         # Both attempts failed
         await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
