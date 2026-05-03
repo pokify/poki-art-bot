@@ -81,7 +81,7 @@ def get_all_files():
         print(f"Failed to fetch files: {e}")
         return all_files or []
 
-# =============== /art COMMAND ===============
+# =============== /art COMMAND (Normal random) ===============
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         files = get_all_files()
@@ -106,39 +106,58 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         print(f"Sending: {chosen} | Seen: {len(seen_images)}/{len(files)}")
 
-        # Try up to 2 times (original attempt + 1 retry) - silent retry
-        for attempt in range(2):
-            try:
-                r = requests.get(url, timeout=15)
-                r.raise_for_status()
-                
-                suffix = os.path.splitext(chosen)[1] or ".jpg"
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                tmp.write(r.content)
-                tmp_path = tmp.name
-                tmp.close()
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
 
-                with open(tmp_path, "rb") as photo:
-                    await update.message.reply_photo(photo=photo)
+        suffix = os.path.splitext(chosen)[1] or ".jpg"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(r.content)
+        tmp_path = tmp.name
+        tmp.close()
 
-                os.unlink(tmp_path)
-                return
+        with open(tmp_path, "rb") as file:
+            if chosen.endswith(".gif"):
+                await update.message.reply_animation(animation=file)
+            else:
+                await update.message.reply_photo(photo=file)
 
-            except Exception as e:
-                print(f"Attempt {attempt+1} failed for {chosen}: {e}")
-                continue  # Silent retry on first failure
-
-        # Both attempts failed
-        await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
+        os.unlink(tmp_path)
 
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        print(f"Art error: {e}")
         await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
+
+# =============== /test COMMAND (Specific GIF) ===============
+async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        file_name = "hamster (1360).gif"
+        encoded = urllib.parse.quote(file_name)
+        url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/{FOLDER_PATH}/{encoded}"
+
+        print(f"/test command - Sending specific GIF: {file_name}")
+
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".gif")
+        tmp.write(r.content)
+        tmp_path = tmp.name
+        tmp.close()
+
+        with open(tmp_path, "rb") as file:
+            await update.message.reply_animation(animation=file)
+
+        os.unlink(tmp_path)
+
+    except Exception as e:
+        print(f"/test error: {e}")
+        await update.message.reply_text("Could not load the test GIF. Try again later! 🐹")
 
 # =============== MAIN ===============
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("art", art))
+    app.add_handler(CommandHandler("test", test))   # ← New command
     total = len(get_all_files())
     print(f"Poki Art Bot LIVE! {total} images ready | Seen: {len(seen_images)}")
     app.run_polling()
