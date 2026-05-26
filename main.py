@@ -4,6 +4,7 @@ import os
 import tempfile
 import urllib.parse
 import pickle
+import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -25,6 +26,8 @@ STATE_FILE = f"{DATA_DIR}/poki_state.pkl"
 # Global state
 all_files = []
 seen_images = set()
+last_refresh = None
+REFRESH_COOLDOWN_MINUTES = 10   # ← Change this if you want (e.g. 5 or 15)
 
 # =============== STATE PERSISTENCE ===============
 def load_state():
@@ -35,51 +38,63 @@ def load_state():
                 data = pickle.load(f)
                 seen_images = set(data.get("seen", []))
                 all_files = data.get("files", [])
-        except:
-            pass
+            print(f"[{datetime.datetime.now()}] State loaded: {len(seen_images)} seen, {len(all_files)} files cached")
+        except Exception as e:
+            print(f"[{datetime.datetime.now()}] Failed to load state: {e}")
 
 def save_state():
     try:
         with open(STATE_FILE, "wb") as f:
             pickle.dump({"seen": list(seen_images), "files": all_files}, f)
-    except:
-        pass
+    except Exception as e:
+        print(f"[{datetime.datetime.now()}] Failed to save state: {e}")
 
 load_state()
 
-# =============== FETCH ALL IMAGES ===============
+# =============== FETCH ALL IMAGES (with cooldown) ===============
 def get_all_files():
-    global all_files
-    if all_files:
-        return all_files
+    global all_files, last_refresh
+    now = datetime.datetime.now()
 
-    try:
-        commit_sha = requests.get(
-            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}", 
-            timeout=10
-        ).json()["sha"]
+    # Check if we should refresh
+    if (last_refresh is None or 
+        (now - last_refresh).total_seconds() > REFRESH_COOLDOWN_MINUTES * 60):
         
-        tree = requests.get(
-            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{commit_sha}?recursive=1", 
-            timeout=20
-        ).json()["tree"]
+        print(f"[{now}] 🔄 Refreshing file list from GitHub... (cooldown: {REFRESH_COOLDOWN_MINUTES} min)")
+        try:
+            commit_sha = requests.get(
+                f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}", 
+                timeout=10
+            ).json()["sha"]
+            
+            tree = requests.get(
+                f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/trees/{commit_sha}?recursive=1", 
+                timeout=30
+            ).json()["tree"]
 
-        prefix = f"{FOLDER_PATH}/"
-        files = []
-        for item in tree:
-            if item.get("type") == "blob" and item["path"].startswith(prefix):
-                name = item["path"][len(prefix):]
-                if name.startswith("hamster (") and name.endswith((".png", ".jpg", ".gif")):
-                    files.append(name)
+            prefix = f"{FOLDER_PATH}/"
+            files = []
+            for item in tree:
+                if item.get("type") == "blob" and item["path"].startswith(prefix):
+                    name = item["path"][len(prefix):]
+                    if name.startswith("hamster (") and name.endswith((".png", ".jpg", ".gif")):
+                        files.append(name)
 
-        all_files = files
-        print(f"Refreshed: Found {len(all_files)} hamster images.")
-        save_state()
-        return all_files
+            all_files = files
+            last_refresh = now
+            print(f"[{now}] ✅ Refreshed successfully: {len(all_files)} hamster images.")
+            save_state()
+            return all_files
 
-    except Exception as e:
-        print(f"Failed to fetch files: {e}")
-        return all_files or []
+        except Exception as e:
+            print(f"[{now}] ❌ Failed to fetch files: {e}")
+            if all_files:
+                print(f"[{now}] Using cached list ({len(all_files)} files)")
+
+    else:
+        print(f"[{now}] 📦 Using cached list ({len(all_files)} files). Next refresh in ~{REFRESH_COOLDOWN_MINUTES} min.")
+
+    return all_files or []
 
 # =============== /art COMMAND ===============
 async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,6 +106,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(seen_images) >= len(files):
             seen_images.clear()
+            print("Seen list reset (reached end of collection)")
             save_state()
 
         available = [f for f in files if f not in seen_images]
@@ -106,7 +122,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         print(f"Sending: {chosen} | Seen: {len(seen_images)}/{len(files)}")
 
-        # Try up to 2 times (original attempt + 1 retry) - silent retry
+        # Try up to 2 times (silent retry)
         for attempt in range(2):
             try:
                 r = requests.get(url, timeout=15)
@@ -126,21 +142,22 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             except Exception as e:
                 print(f"Attempt {attempt+1} failed for {chosen}: {e}")
-                continue  # Silent retry on first failure
+                continue
 
-        # Both attempts failed
         await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
 
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        print(f"Unexpected error in /art: {e}")
         await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
 
 # =============== MAIN ===============
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("art", art))
+    
     total = len(get_all_files())
-    print(f"Poki Art Bot LIVE! {total} images ready | Seen: {len(seen_images)}")
+    print(f"\n🚀 Poki Art Bot LIVE! {total} images ready | Seen: {len(seen_images)}\n")
+    
     app.run_polling()
 
 if __name__ == "__main__":
