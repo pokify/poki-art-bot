@@ -1,10 +1,10 @@
 import random
 import requests
 import os
-import tempfile
 import urllib.parse
 import pickle
 import datetime
+from io import BytesIO
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -27,25 +27,25 @@ STATE_FILE = f"{DATA_DIR}/poki_state.pkl"
 all_files = []
 seen_images = set()
 last_refresh = None
-REFRESH_COOLDOWN_MINUTES = 10   # ← Change this if you want (e.g. 5 or 15)
+REFRESH_COOLDOWN_MINUTES = 10
 
 # =============== STATE PERSISTENCE ===============
 def load_state():
-    global seen_images, all_files
+    global seen_images
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "rb") as f:
                 data = pickle.load(f)
                 seen_images = set(data.get("seen", []))
-                all_files = data.get("files", [])
-            print(f"[{datetime.datetime.now()}] State loaded: {len(seen_images)} seen, {len(all_files)} files cached")
+            print(f"[{datetime.datetime.now()}] State loaded: {len(seen_images)} seen images")
         except Exception as e:
             print(f"[{datetime.datetime.now()}] Failed to load state: {e}")
 
 def save_state():
     try:
         with open(STATE_FILE, "wb") as f:
-            pickle.dump({"seen": list(seen_images), "files": all_files}, f)
+            # Only save the seen list (very small)
+            pickle.dump({"seen": list(seen_images)}, f)
     except Exception as e:
         print(f"[{datetime.datetime.now()}] Failed to save state: {e}")
 
@@ -56,7 +56,6 @@ def get_all_files():
     global all_files, last_refresh
     now = datetime.datetime.now()
 
-    # Check if we should refresh
     if (last_refresh is None or 
         (now - last_refresh).total_seconds() > REFRESH_COOLDOWN_MINUTES * 60):
         
@@ -83,16 +82,14 @@ def get_all_files():
             all_files = files
             last_refresh = now
             print(f"[{now}] ✅ Refreshed successfully: {len(all_files)} hamster images.")
-            save_state()
             return all_files
 
         except Exception as e:
             print(f"[{now}] ❌ Failed to fetch files: {e}")
             if all_files:
                 print(f"[{now}] Using cached list ({len(all_files)} files)")
-
     else:
-        print(f"[{now}] 📦 Using cached list ({len(all_files)} files). Next refresh in ~{REFRESH_COOLDOWN_MINUTES} min.")
+        print(f"[{now}] 📦 Using cached list ({len(all_files)} files)")
 
     return all_files or []
 
@@ -127,17 +124,12 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 r = requests.get(url, timeout=15)
                 r.raise_for_status()
-                
-                suffix = os.path.splitext(chosen)[1] or ".jpg"
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                tmp.write(r.content)
-                tmp_path = tmp.name
-                tmp.close()
 
-                with open(tmp_path, "rb") as photo:
-                    await update.message.reply_photo(photo=photo)
+                # Use in-memory BytesIO → no disk usage
+                photo = BytesIO(r.content)
+                photo.name = chosen
 
-                os.unlink(tmp_path)
+                await update.message.reply_photo(photo=photo)
                 return
 
             except Exception as e:
