@@ -44,7 +44,6 @@ def load_state():
 def save_state():
     try:
         with open(STATE_FILE, "wb") as f:
-            # Only save the seen list (very small)
             pickle.dump({"seen": list(seen_images)}, f)
     except Exception as e:
         print(f"[{datetime.datetime.now()}] Failed to save state: {e}")
@@ -106,36 +105,45 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print("Seen list reset (reached end of collection)")
             save_state()
 
-        available = [f for f in files if f not in seen_images]
-        if not available:
-            available = files
+        # Try up to 3 different images
+        max_attempts = 3
+        tried = set()
 
-        chosen = random.choice(available)
-        seen_images.add(chosen)
-        save_state()
+        for attempt in range(max_attempts):
+            available = [f for f in files if f not in seen_images and f not in tried]
+            if not available:
+                available = [f for f in files if f not in tried]
+            if not available:
+                break
 
-        encoded = urllib.parse.quote(chosen)
-        url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/{FOLDER_PATH}/{encoded}"
+            chosen = random.choice(available)
+            tried.add(chosen)
 
-        print(f"Sending: {chosen} | Seen: {len(seen_images)}/{len(files)}")
+            encoded = urllib.parse.quote(chosen)
+            url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/{FOLDER_PATH}/{encoded}"
 
-        # Try up to 2 times (silent retry)
-        for attempt in range(2):
+            print(f"Trying: {chosen} | Attempt {attempt+1}/{max_attempts} | Seen: {len(seen_images)}/{len(files)}")
+
             try:
                 r = requests.get(url, timeout=15)
                 r.raise_for_status()
 
-                # Use in-memory BytesIO → no disk usage
                 photo = BytesIO(r.content)
                 photo.name = chosen
 
                 await update.message.reply_photo(photo=photo)
+
+                # Only mark as seen AFTER successful send
+                seen_images.add(chosen)
+                save_state()
+                print(f"✅ Sent successfully: {chosen}")
                 return
 
             except Exception as e:
                 print(f"Attempt {attempt+1} failed for {chosen}: {e}")
                 continue
 
+        # All attempts failed
         await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
 
     except Exception as e:
