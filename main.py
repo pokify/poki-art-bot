@@ -17,6 +17,7 @@ REPO_OWNER = "pokify"
 REPO_NAME = "poki-art-bot"
 BRANCH = "main"
 FOLDER_PATH = "media-uploads"
+MORE_ART_URL = "https://t.me/pokithehammy"
 
 # Persistent storage
 DATA_DIR = "/data"
@@ -131,7 +132,11 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photo = BytesIO(r.content)
                 photo.name = chosen
 
-                await update.message.reply_photo(photo=photo)
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=f'<a href="{MORE_ART_URL}">more art</a>',
+                    parse_mode="HTML"
+                )
 
                 # Only mark as seen AFTER successful send
                 seen_images.add(chosen)
