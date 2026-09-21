@@ -134,7 +134,7 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await update.message.reply_photo(
                     photo=photo,
-                    caption=f'₍ᵔ.  ̫.ᵔ₎ﾉ <a href="{MORE_ART_URL}">more art</a>',
+                    caption=f'₍ᵔ.  ̫.ᵔ₎ﾉ <a href="{MORE_ART_URL}">gallery</a>',
                     parse_mode="HTML"
                 )
 
