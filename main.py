@@ -6,7 +6,7 @@ import pickle
 import datetime
 import asyncio
 from io import BytesIO
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
 # ================= CONFIG =================
@@ -300,6 +300,25 @@ async def post_init(app):
     global settings_changed
     settings_changed = asyncio.Event()
     app.create_task(auto_art_loop(app), name="auto_art_loop")
+
+    # Register commands so they appear in the Telegram menu
+    # Group chats: show /art and /artsettings with the requested description
+    await app.bot.set_my_commands(
+        commands=[
+            BotCommand("art", "Get random Poki art"),
+            BotCommand("artsettings", "art bot settings"),
+        ],
+        scope=BotCommandScopeAllGroupChats()
+    )
+    # Private chats as well for consistency
+    await app.bot.set_my_commands(
+        commands=[
+            BotCommand("art", "Get random Poki art"),
+            BotCommand("artsettings", "art bot settings"),
+            BotCommand("start", "Start the bot"),
+        ],
+        scope=BotCommandScopeAllPrivateChats()
+    )
 
 
 # =============== MAIN ===============
