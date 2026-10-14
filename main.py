@@ -94,77 +94,68 @@ def get_all_files():
 
     return all_files or []
 
-# =============== /art COMMAND ===============
-async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        files = get_all_files()
+# =============== ART SENDING ===============
+async def send_art_to_chat(bot, chat_id, count=1):
+    """Send up to count artwork images to a Telegram chat."""
+    sent = 0
+    for _ in range(max(1, int(count))):
+        files = await asyncio.to_thread(get_all_files)
         if not files:
-            await update.message.reply_text("No hamster art found right now. Try again soon! 🐹")
-            return
-
+            print("No artwork files available.")
+            break
         if len(seen_images) >= len(files):
             seen_images.clear()
-            print("Seen list reset (reached end of collection)")
             save_state()
-
-        # Try up to 3 different images
-        max_attempts = 3
-        tried = set()
-
-        for attempt in range(max_attempts):
-            available = [f for f in files if f not in seen_images and f not in tried]
-            if not available:
-                available = [f for f in files if f not in tried]
-            if not available:
-                break
-
-            chosen = random.choice(available)
-            tried.add(chosen)
-
+        available = [f for f in files if f not in seen_images]
+        if not available:
+            seen_images.clear()
+            available = list(files)
+        random.shuffle(available)
+        delivered = False
+        for chosen in available[:min(10, len(available))]:
             encoded = urllib.parse.quote(chosen)
             url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/{FOLDER_PATH}/{encoded}"
-
-            print(f"Trying: {chosen} | Attempt {attempt+1}/{max_attempts} | Seen: {len(seen_images)}/{len(files)}")
-
             try:
-                r = requests.get(url, timeout=15)
+                r = await asyncio.to_thread(requests.get, url, timeout=15)
                 r.raise_for_status()
-
                 photo = BytesIO(r.content)
                 photo.name = chosen
-
-                await update.message.reply_photo(
-                    photo=photo,
+                await bot.send_photo(
+                    chat_id=chat_id, photo=photo,
                     caption=f'🖼️ <a href="{MORE_ART_URL}"><u>gallery</u></a>',
-                    parse_mode="HTML"
-                )
-
-                # Only mark as seen AFTER successful send
+                    parse_mode="HTML")
                 seen_images.add(chosen)
                 save_state()
-                print(f"✅ Sent successfully: {chosen}")
-                return
-
+                sent += 1
+                delivered = True
+                print(f"Art sent to {chat_id}: {chosen}")
+                break
             except Exception as e:
-                print(f"Attempt {attempt+1} failed for {chosen}: {e}")
-                continue
+                print(f"Failed sending {chosen} to {chat_id}: {e}")
+        if not delivered:
+            break
+    return sent
 
-        # All attempts failed
-        await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
-
+async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        sent = await send_art_to_chat(context.bot, update.effective_chat.id, 1)
+        if not sent and update.effective_message:
+            await update.effective_message.reply_text("Couldn't send art right now. Please try again.")
     except Exception as e:
         print(f"Unexpected error in /art: {e}")
-        await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
-
+        if update.effective_message:
+            await update.effective_message.reply_text("Couldn't send art right now. Please try again.")
 
 # =============== ART SETTINGS ===============
 SETTINGS_FILE = f"{DATA_DIR}/art_settings.pkl"
-art_settings = {"minutes": "60", "posts": 1}
+art_settings = {"minutes": "60", "posts": 1, "chat_id": None}
 def load_art_settings():
     global art_settings
     try:
         with open(SETTINGS_FILE, "rb") as f:
             art_settings.update(pickle.load(f))
+        art_settings["minutes"] = str(art_settings.get("minutes", "60"))
+        art_settings["posts"] = max(1, min(20, int(art_settings.get("posts", 1))))
     except Exception:
         pass
 
@@ -204,7 +195,7 @@ async def artsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(
-        "open", url="https://t.me/PokiArt_Bot?start=artsettings")]])
+        "open", url=f"https://t.me/PokiArt_Bot?start=artsettings_{update.effective_chat.id}")]])
     msg = await context.bot.send_message(
         chat_id=update.effective_chat.id, text="Config Artbot", reply_markup=keyboard)
     async def remove_prompt():
@@ -216,7 +207,17 @@ async def artsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(remove_prompt())
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args and context.args[0] == "artsettings":
+    if context.args and context.args[0].startswith("artsettings"):
+        payload = context.args[0]
+        parts = payload.split("_", 1)
+        if len(parts) == 2:
+            try:
+                art_settings["chat_id"] = int(parts[1])
+            except ValueError:
+                art_settings["chat_id"] = update.effective_chat.id
+        else:
+            art_settings["chat_id"] = update.effective_chat.id
+        save_art_settings()
         await show_settings(update, context)
 
 async def art_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -248,14 +249,62 @@ async def art_settings_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pass
     elif data == "artsave":
         save_art_settings()
+        if settings_changed is not None:
+            settings_changed.set()
         await q.edit_message_text(
             f"Saved!\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
             f"\nNumber to post: {art_settings['posts']}")
 
 
+
+async def auto_art_loop(app):
+    """Post artwork on the configured interval; settings saves wake the loop immediately."""
+    print("Auto-art scheduler started")
+    while True:
+        try:
+            minutes = max(0, int(str(art_settings.get("minutes", "60")) or "0"))
+            if minutes == 0:
+                if settings_changed is not None:
+                    settings_changed.clear()
+                    await settings_changed.wait()
+                else:
+                    await asyncio.sleep(30)
+                continue
+            if settings_changed is not None:
+                settings_changed.clear()
+                try:
+                    await asyncio.wait_for(settings_changed.wait(), timeout=minutes * 60)
+                    continue  # configuration changed; recalculate interval
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(minutes * 60)
+            # Re-read settings after waiting, so disabling/changing the interval takes effect.
+            minutes = max(0, int(str(art_settings.get("minutes", "60")) or "0"))
+            if minutes == 0:
+                continue
+            chat_id = art_settings.get("chat_id")
+            if not chat_id:
+                print("Auto-art skipped: no destination chat configured. Open /artsettings from the target chat.")
+                continue
+            count = max(1, min(20, int(art_settings.get("posts", 1))))
+            print(f"Auto-art triggered: {count} post(s) to {chat_id}")
+            await send_art_to_chat(app.bot, chat_id, count)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"Auto-art scheduler error: {e}")
+            await asyncio.sleep(5)
+
+async def post_init(app):
+    global settings_changed
+    settings_changed = asyncio.Event()
+    app.create_task(auto_art_loop(app), name="auto_art_loop")
+
+
 # =============== MAIN ===============
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("art", art))
     app.add_handler(CommandHandler("artsettings", artsettings))
     app.add_handler(CommandHandler("start", start))
