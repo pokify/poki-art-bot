@@ -190,8 +190,8 @@ def settings_keyboard():
     return InlineKeyboardMarkup(rows)
 
 async def show_settings(update, context):
-    text = (f"Set auto-art posts\\n\\nPost art every: {art_settings['minutes']}mins (0 = none)"
-            f"\\nNumber to post: {art_settings['posts']}")
+    text = (f"Set auto-art posts\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
+            f"\nNumber to post: {art_settings['posts']}")
     if update.message:
         await update.message.reply_text(text, reply_markup=settings_keyboard())
     else:
@@ -232,25 +232,25 @@ async def art_settings_callback(update: Update, context: ContextTypes.DEFAULT_TY
             current = ("" if current == "0" else current) + value
         art_settings["minutes"] = current or "0"
         await q.edit_message_text(
-            f"Set auto-art posts\\n\\nPost art every: {art_settings['minutes']}mins (0 = none)"
-            f"\\nNumber to post: {art_settings['posts']}", reply_markup=settings_keyboard())
+            f"Set auto-art posts\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
+            f"\nNumber to post: {art_settings['posts']}", reply_markup=settings_keyboard())
     elif data == "artposts:+":
         art_settings["posts"] = min(20, int(art_settings["posts"]) + 1)
         await q.edit_message_text(
-            f"Set auto-art posts\\n\\nPost art every: {art_settings['minutes']}mins (0 = none)"
-            f"\\nNumber to post: {art_settings['posts']}", reply_markup=settings_keyboard())
+            f"Set auto-art posts\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
+            f"\nNumber to post: {art_settings['posts']}", reply_markup=settings_keyboard())
     elif data == "artposts:-":
         art_settings["posts"] = max(1, int(art_settings["posts"]) - 1)
         await q.edit_message_text(
-            f"Set auto-art posts\\n\\nPost art every: {art_settings['minutes']}mins (0 = none)"
-            f"\\nNumber to post: {art_settings['posts']}", reply_markup=settings_keyboard())
+            f"Set auto-art posts\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
+            f"\nNumber to post: {art_settings['posts']}", reply_markup=settings_keyboard())
     elif data == "artposts:show":
         pass
     elif data == "artsave":
         save_art_settings()
         await q.edit_message_text(
-            f"Saved!\\n\\nPost art every: {art_settings['minutes']}mins (0 = none)"
-            f"\\nNumber to post: {art_settings['posts']}")
+            f"Saved!\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
+            f"\nNumber to post: {art_settings['posts']}")
 
 
 # =============== MAIN ===============
