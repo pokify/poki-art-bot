@@ -5,6 +5,7 @@ import urllib.parse
 import pickle
 import datetime
 import asyncio
+import logging
 from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -13,6 +14,12 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -47,16 +54,16 @@ def load_state():
                 data = pickle.load(f)
                 seen_images = set(data.get("seen", []))
                 chat_settings = data.get("settings", {})
-            print(f"[{datetime.datetime.now()}] State loaded: {len(seen_images)} seen images, {len(chat_settings)} settings")
+            logger.info(f"State loaded: {len(seen_images)} seen images, {len(chat_settings)} settings")
         except Exception as e:
-            print(f"[{datetime.datetime.now()}] Failed to load state: {e}")
+            logger.error(f"Failed to load state: {e}")
 
 def save_state():
     try:
         with open(STATE_FILE, "wb") as f:
             pickle.dump({"seen": list(seen_images), "settings": chat_settings}, f)
     except Exception as e:
-        print(f"[{datetime.datetime.now()}] Failed to save state: {e}")
+        logger.error(f"Failed to save state: {e}")
 
 load_state()
 
@@ -66,6 +73,7 @@ def get_chat_settings(chat_id: int) -> dict:
 def save_chat_settings(chat_id: int, interval: int, num: int):
     chat_settings[chat_id] = {"interval": interval, "num": num}
     save_state()
+    logger.info(f"Saved settings for {chat_id}: every {interval}min, {num} posts")
 
 # =============== FETCH ALL IMAGES (with cooldown) ===============
 def get_all_files():
@@ -75,7 +83,7 @@ def get_all_files():
     if (last_refresh is None or 
         (now - last_refresh).total_seconds() > REFRESH_COOLDOWN_MINUTES * 60):
         
-        print(f"[{now}] 🔄 Refreshing file list from GitHub... (cooldown: {REFRESH_COOLDOWN_MINUTES} min)")
+        logger.info(f"Refreshing file list from GitHub... (cooldown: {REFRESH_COOLDOWN_MINUTES} min)")
         try:
             commit_sha = requests.get(
                 f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}", 
@@ -97,15 +105,15 @@ def get_all_files():
 
             all_files = files
             last_refresh = now
-            print(f"[{now}] ✅ Refreshed successfully: {len(all_files)} hamster images.")
+            logger.info(f"Refreshed successfully: {len(all_files)} hamster images.")
             return all_files
 
         except Exception as e:
-            print(f"[{now}] ❌ Failed to fetch files: {e}")
+            logger.error(f"Failed to fetch files: {e}")
             if all_files:
-                print(f"[{now}] Using cached list ({len(all_files)} files)")
+                logger.info(f"Using cached list ({len(all_files)} files)")
     else:
-        print(f"[{now}] 📦 Using cached list ({len(all_files)} files)")
+        logger.info(f"Using cached list ({len(all_files)} files)")
 
     return all_files or []
 
@@ -118,7 +126,7 @@ async def send_random_art(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
 
     if len(seen_images) >= len(files):
         seen_images.clear()
-        print("Seen list reset (reached end of collection)")
+        logger.info("Seen list reset (reached end of collection)")
         save_state()
 
     max_attempts = 3
@@ -153,11 +161,11 @@ async def send_random_art(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
 
             seen_images.add(chosen)
             save_state()
-            print(f"✅ Sent successfully to {chat_id}: {chosen}")
+            logger.info(f"Sent successfully to {chat_id}: {chosen}")
             return True
 
         except Exception as e:
-            print(f"Attempt {attempt+1} failed for {chosen}: {e}")
+            logger.warning(f"Attempt {attempt+1} failed for {chosen}: {e}")
             continue
 
     return False
@@ -169,25 +177,30 @@ async def art(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not success:
             await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
     except Exception as e:
-        print(f"Unexpected error in /art: {e}")
+        logger.error(f"Unexpected error in /art: {e}")
         await update.message.reply_text("Defeated by my smolness, try /art again 🐹")
 
 # =============== /artsettings COMMAND ===============
 async def delete_config_msg(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
+    chat_id = job.chat_id
+    message_id = job.data
     try:
-        await context.bot.delete_message(chat_id=job.chat_id, message_id=job.data)
-    except Exception:
-        pass
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"Deleted Config Artbot message {message_id} in chat {chat_id}")
+    except Exception as e:
+        logger.warning(f"Could not delete Config Artbot message {message_id} in {chat_id}: {e}")
 
 async def artsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    logger.info(f"/artsettings called in chat {chat_id}")
 
     # Delete the /artsettings command message immediately
     try:
         await update.message.delete()
-    except Exception:
-        pass
+        logger.info(f"Deleted /artsettings command message in {chat_id}")
+    except Exception as e:
+        logger.warning(f"Could not delete /artsettings command: {e}")
 
     # Send Config Artbot with Open button (deep link to bot)
     deep_link = f"https://t.me/{BOT_USERNAME}?start=settings_{chat_id}"
@@ -197,6 +210,7 @@ async def artsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text="Config Artbot",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    logger.info(f"Sent Config Artbot message {msg.message_id} in {chat_id}")
 
     # Delete Config Artbot message after 6 seconds
     context.job_queue.run_once(
@@ -206,6 +220,7 @@ async def artsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data=msg.message_id,
         name=f"del_config_{chat_id}_{msg.message_id}"
     )
+    logger.info(f"Scheduled deletion of Config Artbot message in 6 seconds")
 
 # =============== SETTINGS UI HELPERS ===============
 def get_settings_text(interval_str: str, num: int) -> str:
@@ -217,8 +232,7 @@ def get_settings_text(interval_str: str, num: int) -> str:
     )
 
 def get_settings_keyboard() -> InlineKeyboardMarkup:
-    # Number pad for minutes (0-9 + < delete)
-    # Using "<" — Telegram handles it fine in button text
+    # Number pad for minutes (0-9 + ⌫ delete) — Unicode backspace, no HTML
     rows = [
         [
             InlineKeyboardButton("1", callback_data="digit_1"),
@@ -237,7 +251,7 @@ def get_settings_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("0", callback_data="digit_0"),
-            InlineKeyboardButton("<", callback_data="digit_del"),
+            InlineKeyboardButton("⌫", callback_data="digit_del"),
         ],
     ]
     # Posts controls: - Posts +
@@ -250,23 +264,12 @@ def get_settings_keyboard() -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("Save", callback_data="save")])
     return InlineKeyboardMarkup(rows)
 
-async def send_settings_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ud = context.user_data
-    interval_str = ud.get("interval_str", "60")
-    num = ud.get("num_posts", 1)
-    text = get_settings_text(interval_str, num)
-    keyboard = get_settings_keyboard()
-
-    if update.message:
-        await update.message.reply_text(text, reply_markup=keyboard)
-    elif update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard)
-
 # =============== /start (deep link for settings) ===============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and context.args[0].startswith("settings_"):
         try:
             target_chat = int(context.args[0].split("_", 1)[1])
+            logger.info(f"Settings deep link for chat {target_chat}")
         except (ValueError, IndexError):
             await update.message.reply_text("Invalid settings link.")
             return
@@ -275,8 +278,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["target_chat"] = target_chat
         context.user_data["interval_str"] = str(settings["interval"])
         context.user_data["num_posts"] = settings["num"]
+        logger.info(f"Loaded settings for {target_chat}: {settings}")
 
-        await send_settings_message(update, context)
+        text = get_settings_text(context.user_data["interval_str"], context.user_data["num_posts"])
+        keyboard = get_settings_keyboard()
+        await update.message.reply_text(text, reply_markup=keyboard)
     else:
         await update.message.reply_text(
             "Hi! I'm Poki Art Bot 🐹\n"
@@ -290,62 +296,72 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     ud = context.user_data
+    logger.info(f"Callback received: {data} | user_data keys: {list(ud.keys())}")
 
-    if "target_chat" not in ud:
-        await query.edit_message_text("Session expired. Please use /artsettings again from the group.")
-        return
+    try:
+        if "target_chat" not in ud:
+            await query.edit_message_text("Session expired. Please use /artsettings again from the group.")
+            return
 
-    interval_str = ud.get("interval_str", "60")
-    num = ud.get("num_posts", 1)
+        interval_str = ud.get("interval_str", "60")
+        num = ud.get("num_posts", 1)
 
-    if data.startswith("digit_"):
-        if data == "digit_del":
-            interval_str = interval_str[:-1] if interval_str else ""
-        else:
-            digit = data.split("_", 1)[1]
-            if len(interval_str) < 5:  # reasonable limit
-                interval_str += digit
+        if data.startswith("digit_"):
+            if data == "digit_del":
+                interval_str = interval_str[:-1] if interval_str else ""
+            else:
+                digit = data.split("_", 1)[1]
+                if len(interval_str) < 5:
+                    interval_str += digit
+            ud["interval_str"] = interval_str
+            logger.info(f"Interval string now: '{interval_str}'")
+
+        elif data == "post_inc":
+            num = min(num + 1, 10)
+            ud["num_posts"] = num
+            logger.info(f"Posts increased to {num}")
+
+        elif data == "post_dec":
+            num = max(num - 1, 1)
+            ud["num_posts"] = num
+            logger.info(f"Posts decreased to {num}")
+
+        elif data == "save":
+            try:
+                interval = int(interval_str) if interval_str else 0
+            except ValueError:
+                interval = 0
+
+            target_chat = ud["target_chat"]
+            save_chat_settings(target_chat, interval, num)
+            update_auto_job(context.application, target_chat, interval, num)
+
+            await query.edit_message_text(
+                f"✅ Settings saved!\n\n"
+                f"Post art every: {interval}mins\n"
+                f"Number to post: {num}"
+            )
+            logger.info(f"Settings saved for {target_chat}")
+            ud.clear()
+            return
+
+        elif data == "ignore":
+            return
+
+        # Refresh the settings message (plain text, no HTML)
         ud["interval_str"] = interval_str
-
-    elif data == "post_inc":
-        num = min(num + 1, 10)
         ud["num_posts"] = num
-
-    elif data == "post_dec":
-        num = max(num - 1, 1)
-        ud["num_posts"] = num
-
-    elif data == "save":
-        try:
-            interval = int(interval_str) if interval_str else 0
-        except ValueError:
-            interval = 0
-
-        target_chat = ud["target_chat"]
-        save_chat_settings(target_chat, interval, num)
-
-        # Update / reschedule the auto job
-        update_auto_job(context.application, target_chat, interval, num)
-
         await query.edit_message_text(
-            f"✅ Settings saved!\n\n"
-            f"Post art every: {interval}mins\n"
-            f"Number to post: {num}"
+            text=get_settings_text(interval_str, num),
+            reply_markup=get_settings_keyboard()
         )
-        # Clear session
-        ud.clear()
-        return
 
-    elif data == "ignore":
-        return  # do nothing for the "Posts" label button
-
-    # Refresh the settings message
-    ud["interval_str"] = interval_str
-    ud["num_posts"] = num
-    await query.edit_message_text(
-        text=get_settings_text(interval_str, num),
-        reply_markup=get_settings_keyboard()
-    )
+    except Exception as e:
+        logger.error(f"Error in settings_callback: {e}", exc_info=True)
+        try:
+            await query.edit_message_text(f"Error: {e}")
+        except Exception:
+            await query.answer(f"Error: {e}", show_alert=True)
 
 # =============== AUTO POST JOB ===============
 async def auto_post_job(context: ContextTypes.DEFAULT_TYPE):
@@ -353,18 +369,18 @@ async def auto_post_job(context: ContextTypes.DEFAULT_TYPE):
     chat_id = job.chat_id
     num = job.data.get("num", 1) if job.data else 1
 
-    print(f"[{datetime.datetime.now()}] Auto-posting {num} art(s) to {chat_id}")
+    logger.info(f"Auto-posting {num} art(s) to {chat_id}")
     for i in range(num):
         await send_random_art(context, chat_id)
         if i < num - 1:
-            await asyncio.sleep(2)  # small delay between posts
+            await asyncio.sleep(2)
 
 def update_auto_job(app: Application, chat_id: int, interval_minutes: int, num: int):
     """Remove old job and schedule new one if interval > 0."""
     job_name = f"auto_{chat_id}"
-    # Remove existing jobs for this chat
     for job in app.job_queue.get_jobs_by_name(job_name):
         job.schedule_removal()
+        logger.info(f"Removed old job {job_name}")
 
     if interval_minutes > 0:
         app.job_queue.run_repeating(
@@ -375,9 +391,9 @@ def update_auto_job(app: Application, chat_id: int, interval_minutes: int, num: 
             name=job_name,
             data={"num": num},
         )
-        print(f"Scheduled auto-art for chat {chat_id}: every {interval_minutes}min, {num} posts")
+        logger.info(f"Scheduled auto-art for chat {chat_id}: every {interval_minutes}min, {num} posts")
     else:
-        print(f"Disabled auto-art for chat {chat_id}")
+        logger.info(f"Disabled auto-art for chat {chat_id}")
 
 def schedule_existing_jobs(app: Application):
     """On startup, restore auto jobs from saved settings."""
@@ -400,7 +416,7 @@ def main():
     schedule_existing_jobs(app)
 
     total = len(get_all_files())
-    print(f"\n🚀 Poki Art Bot LIVE! {total} images ready | Seen: {len(seen_images)} | Settings: {len(chat_settings)}\n")
+    logger.info(f"Poki Art Bot LIVE! {total} images ready | Seen: {len(seen_images)} | Settings: {len(chat_settings)}")
 
     app.run_polling()
 
