@@ -255,8 +255,6 @@ async def art_settings_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"Saved!\n\nPost art every: {art_settings['minutes']}mins (0 = none)"
             f"\nNumber to post: {art_settings['posts']}")
 
-
-
 async def auto_art_loop(app):
     """Post artwork on the configured interval; settings saves wake the loop immediately."""
     print("Auto-art scheduler started")
@@ -299,7 +297,9 @@ async def auto_art_loop(app):
 async def post_init(app):
     global settings_changed
     settings_changed = asyncio.Event()
-    app.create_task(auto_art_loop(app), name="auto_art_loop")
+    # Start the loop with a plain asyncio task so we don't trigger
+    # the "create_task while application is not running" warning.
+    asyncio.create_task(auto_art_loop(app), name="auto_art_loop")
 
     # Register commands so they appear in the Telegram menu
     # Group chats: show /art and /artsettings with the requested description
@@ -319,7 +319,6 @@ async def post_init(app):
         ],
         scope=BotCommandScopeAllPrivateChats()
     )
-
 
 # =============== MAIN ===============
 def main():
